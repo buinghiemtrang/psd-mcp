@@ -1,6 +1,6 @@
 ---
 name: psd-to-ugui
-description: Ráp hoặc cập nhật UI prefab uGUI trong Unity từ file PSD của art, dùng MCP psd (psd_*) và các tool Unity match_layout_spec / apply_layout_spec / render_prefab. Dùng khi user đưa file .psd (kèm JPG) và nói ráp màn, cập nhật UI theo PSD, so prefab với design, xuất sprite từ PSD.
+description: Ráp hoặc cập nhật UI prefab uGUI trong Unity từ file PSD của art, dùng MCP psd2ui (psd_*) và các tool Unity match_layout_spec / apply_layout_spec / render_prefab. Dùng khi user đưa file .psd (kèm JPG) và nói ráp màn, cập nhật UI theo PSD, so prefab với design, xuất sprite từ PSD.
 ---
 
 # Ráp UI Unity từ PSD
@@ -8,7 +8,7 @@ description: Ráp hoặc cập nhật UI prefab uGUI trong Unity từ file PSD c
 Người dùng chỉ cần nói kiểu: "Ráp màn Victory từ `<file>.psd` (ảnh `<file>.jpg`) vào prefab `Assets/.../X.prefab`". Phần còn lại Claude làm theo các bước dưới, hỏi lại đúng những chỗ cần người quyết.
 
 ## Kiểm tra trước
-1. Có tool `psd_tree` (MCP psd). Không có: báo cài plugin psd-mcp (README).
+1. Có tool `psd_tree` (MCP psd2ui). Không có: báo cài plugin psd-mcp (README).
 2. Có tool `match_layout_spec` (unityMCP + package `com.trangbn.psd-layout`). Không có: vẫn làm được bước đọc / xuất PSD, báo cài package Unity.
 3. Thiếu đường dẫn PSD, prefab đích, hoặc thư mục sprite mới: hỏi một lần, gom thành danh sách đánh số.
 

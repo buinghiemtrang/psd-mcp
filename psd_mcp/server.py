@@ -16,7 +16,7 @@ from mcp.server.mcpserver import MCPServer
 from PIL import Image, ImageChops, ImageDraw
 from psd_tools import PSDImage
 
-mcp = MCPServer("psd", instructions="Đọc PSD của art: cây layer, state ẩn, xuất sprite cắt alpha, render, so ảnh với Unity. Toạ độ PSD gốc trên-trái.")
+mcp = MCPServer("psd2ui", instructions="Đọc PSD của art: cây layer, state ẩn, xuất sprite cắt alpha, render, so ảnh với Unity. Toạ độ PSD gốc trên-trái.")
 
 # PSD lớn mở mất vài giây: cache theo đường dẫn + mtime.
 _cache: dict[str, tuple[float, PSDImage]] = {}

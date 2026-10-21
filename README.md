@@ -14,7 +14,7 @@ Claude đọc PSD, ghép từng layer với object trong prefab, cho bạn xem d
 
 | Phần | Ở đâu | Việc |
 | --- | --- | --- |
-| MCP server `psd` | `psd_mcp/` (Python) | Đọc PSD, xuất sprite, sinh layout spec, so ảnh |
+| MCP server `psd2ui` | `psd_mcp/` (Python) | Đọc PSD, xuất sprite, sinh layout spec, so ảnh |
 | Skill `psd-to-ugui` | `skills/` | Dạy Claude quy trình ráp UI, chỗ nào phải hỏi bạn |
 | Package Unity | `unity/` | 3 tool trong Editor: ghép node, áp spec lên prefab, render prefab |
 
@@ -33,7 +33,7 @@ claude plugin marketplace add buinghiemtrang/psd-mcp
 claude plugin install psd-mcp@psd-mcp-marketplace
 ```
 
-Mở lại Claude Code, gõ `/mcp` thấy server `psd` là xong.
+Mở lại Claude Code, gõ `/mcp` thấy server `psd2ui` là xong.
 
 **2. Package Unity**: Package Manager → `+` → Add package from git URL:
 
@@ -86,16 +86,16 @@ Quy trình ráp (Claude tự chạy, bạn chỉ trả lời khi được hỏi)
 
 | Tool | Bên | Việc |
 | --- | --- | --- |
-| `psd_tree` | psd | Cây layer: id, kind, rect thật (cắt alpha), ẩn, fx, font / cỡ / màu chữ |
-| `psd_states` | psd | Layer ẩn ghép với layer đang hiện cùng chỗ |
-| `psd_export` | psd | Xuất layer ra PNG cắt alpha + rect |
-| `psd_render` | psd | Ảnh composite cả màn / vài layer |
-| `psd_compare` | psd | Ghép PSD, Unity, ảnh chênh |
-| `psd_to_spec` | psd | Sinh `spec.json` + PNG |
-| `psd_match_sprites` | psd | Tìm sprite cũ giống PNG xuất |
-| `psd_text_tint` | psd | Màu / gradient chữ lấy từ JPG |
-| `psd_split_text` | psd | Tách ảnh gộp (icon + chữ) |
-| `psd_variant` | psd | Sinh bản xám / tối cho nút disable |
+| `psd_tree` | psd2ui | Cây layer: id, kind, rect thật (cắt alpha), ẩn, fx, font / cỡ / màu chữ |
+| `psd_states` | psd2ui | Layer ẩn ghép với layer đang hiện cùng chỗ |
+| `psd_export` | psd2ui | Xuất layer ra PNG cắt alpha + rect |
+| `psd_render` | psd2ui | Ảnh composite cả màn / vài layer |
+| `psd_compare` | psd2ui | Ghép PSD, Unity, ảnh chênh |
+| `psd_to_spec` | psd2ui | Sinh `spec.json` + PNG |
+| `psd_match_sprites` | psd2ui | Tìm sprite cũ giống PNG xuất |
+| `psd_text_tint` | psd2ui | Màu / gradient chữ lấy từ JPG |
+| `psd_split_text` | psd2ui | Tách ảnh gộp (icon + chữ) |
+| `psd_variant` | psd2ui | Sinh bản xám / tối cho nút disable |
 | `match_layout_spec` | Unity | Ghép node spec với object prefab |
 | `apply_layout_spec` | Unity | Áp spec lên prefab (mặc định chạy thử) |
 | `render_prefab` | Unity | Render prefab ra PNG |
@@ -104,7 +104,7 @@ Quy trình ráp (Claude tự chạy, bạn chỉ trả lời khi được hỏi)
 
 ```bash
 uv sync
-claude mcp add -s user psd -- uv --directory "$PWD" run psd-mcp   # chạy bản local không qua plugin
+claude mcp add -s user psd2ui -- uv --directory "$PWD" run psd-mcp   # chạy bản local không qua plugin
 claude plugin validate .
 ```
 
