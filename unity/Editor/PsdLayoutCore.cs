@@ -413,9 +413,14 @@ namespace PsdLayout
             else if (!string.IsNullOrEmpty(font))
             {
                 // Không có trong config: tự tìm font TMP trùng tên (bỏ hậu tố SDF), vd. "UTM-Eremitage" → "UTM EREMITAGE SDF".
-                var fa = AutoFont(font);
+                var fa = AutoFont(font, tmp.font, out var others);
                 if (fa == null) ctx.Warnings.Add($"{path}: không tìm thấy font TMP nào giống '{font}' (thêm vào PsdLayoutConfig.json nếu cần)");
-                else if (tmp.font != fa) { ctx.Changes.Add($"{path}: font {(tmp.font ? tmp.font.name : "-")} → {fa.name} (tự chọn)"); tmp.font = fa; }
+                else if (tmp.font != fa)
+                {
+                    ctx.Changes.Add($"{path}: font {(tmp.font ? tmp.font.name : "-")} → {AssetDatabase.GetAssetPath(fa)} (tự chọn)");
+                    if (others != null) ctx.Warnings.Add($"{path}: '{font}' có nhiều font TMP trùng tên, đã chọn {AssetDatabase.GetAssetPath(fa)}; bản khác: {string.Join(", ", others.Select(AssetDatabase.GetAssetPath))}");
+                    tmp.font = fa;
+                }
             }
 
             if (n["size"] != null)
@@ -454,26 +459,40 @@ namespace PsdLayout
             }
         }
 
-        static Dictionary<string, TMP_FontAsset> _fonts;
+        static Dictionary<string, List<TMP_FontAsset>> _fonts;
 
-        static TMP_FontAsset AutoFont(string psdFont)
+        static string FontKey(string name)
         {
+            var k = Norm(name);
+            return k.EndsWith("sdf") ? k.Substring(0, k.Length - 3) : k;
+        }
+
+        /// <summary>Font TMP trùng tên font PSD. Font đang gắn khớp thì giữ; nhiều bản trùng tên thì lấy bản đầu và báo `others`.</summary>
+        static TMP_FontAsset AutoFont(string psdFont, TMP_FontAsset current, out List<TMP_FontAsset> others)
+        {
+            others = null;
             if (_fonts == null)
             {
-                _fonts = new Dictionary<string, TMP_FontAsset>();
+                _fonts = new Dictionary<string, List<TMP_FontAsset>>();
                 foreach (var guid in AssetDatabase.FindAssets("t:TMP_FontAsset"))
                 {
                     var fa = AssetDatabase.LoadAssetAtPath<TMP_FontAsset>(AssetDatabase.GUIDToAssetPath(guid));
                     if (fa == null) continue;
-                    var key = Norm(fa.name);
-                    if (key.EndsWith("sdf")) key = key.Substring(0, key.Length - 3);
-                    if (!_fonts.ContainsKey(key)) _fonts[key] = fa;
+                    var key = FontKey(fa.name);
+                    if (!_fonts.TryGetValue(key, out var list)) _fonts[key] = list = new List<TMP_FontAsset>();
+                    list.Add(fa);
                 }
             }
-            var want = Norm(psdFont);
-            if (_fonts.TryGetValue(want, out var exact)) return exact;
-            var best = _fonts.Select(kv => (fa: kv.Value, score: Similar(want, kv.Key))).OrderByDescending(x => x.score).FirstOrDefault();
-            return best.score >= .8f ? best.fa : null;
+            var want = FontKey(psdFont);
+            if (current != null && Similar(want, FontKey(current.name)) >= .8f) return current;
+            if (!_fonts.TryGetValue(want, out var hits))
+            {
+                var best = _fonts.Select(kv => (list: kv.Value, score: Similar(want, kv.Key))).OrderByDescending(x => x.score).FirstOrDefault();
+                if (best.score < .8f) return null;
+                hits = best.list;
+            }
+            if (hits.Count > 1) others = hits.Skip(1).ToList();
+            return hits[0];
         }
 
         static void ApplySprite(Ctx ctx, JObject n, Image img, string path)
