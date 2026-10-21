@@ -1,7 +1,7 @@
 {
   "name": "psd-mcp",
   "version": "0.2.0",
-  "description": "Đọc PSD của art (cây layer, state ẩn, sprite cắt alpha, màu chữ) và ráp vào prefab uGUI Unity qua unityMCP, có render + so ảnh.",
+  "description": "Đọc PSD của art (cây layer, state ẩn, sprite cắt alpha, màu chữ) để cập nhật hoặc dựng mới UI uGUI Unity (prefab hoặc scene) qua unityMCP, có render + so ảnh.",
   "author": { "name": "Bui Nghiem Trang" },
   "license": "MIT",
   "keywords": ["psd", "photoshop", "unity", "ugui", "mcp"]

@@ -1,14 +1,22 @@
 # psd-mcp: PSD → Unity uGUI với Claude Code
 
-Đưa file PSD của art cho Claude, Claude ráp vào prefab uGUI đang có: đặt đúng vị trí, kích thước, sprite, font, màu chữ, rồi render prefab ra ảnh để so với PSD.
+Đưa file PSD của art cho Claude, Claude làm UI uGUI theo đúng design: vị trí, kích thước, sprite, font, màu chữ, rồi render ra ảnh để so với PSD. Làm được cả 3 trường hợp:
+
+- **Cập nhật prefab đã có** theo PSD mới (giữ script, anchor, Animator).
+- **Dựng prefab mới** khi UI chưa có: tạo object, sprite, chữ, tự suy anchor.
+- **UI nằm thẳng trong scene**: dựng mới hoặc cập nhật, có Undo, bạn tự Save.
 
 Bạn không cần nhớ tên tool. Cài xong, chỉ cần nói:
 
 > Ráp màn Victory từ `D:/design/victory.psd` (ảnh `victory.jpg`) vào prefab `Assets/UI/Victory.prefab`.
 
-Claude đọc PSD, ghép từng layer với object trong prefab, cho bạn xem danh sách thay đổi trước, bạn đồng ý mới lưu.
+> Làm UI mới từ `shop.psd`, lưu `Assets/UI/Shop.prefab`.
 
-*English: a Claude Code plugin (Python MCP server + skill) plus a Unity package. It reads PSD layers, exports alpha-trimmed sprites, builds a layout spec, matches it to an existing uGUI prefab, applies rects / sprites / TMP fonts / colors, and renders the prefab for a side-by-side diff with the PSD.*
+> Dựng `shop.psd` vào Canvas của scene `Lobby`.
+
+Claude đọc PSD, cho bạn xem danh sách thay đổi (hoặc cây object sẽ tạo) trước, bạn đồng ý mới lưu.
+
+*English: a Claude Code plugin (Python MCP server + skill) plus a Unity package. It reads PSD layers, exports alpha-trimmed sprites and builds a layout spec, then updates an existing uGUI prefab, builds a new prefab, or builds / updates UI directly in a scene (with Undo), applying rects, sprites, TMP fonts, colors and auto anchors, and renders the result for a side-by-side diff with the PSD.*
 
 ## Gồm những gì
 
@@ -16,7 +24,7 @@ Claude đọc PSD, ghép từng layer với object trong prefab, cho bạn xem d
 | --- | --- | --- |
 | MCP server `psd2ui` | `psd_mcp/` (Python) | Đọc PSD, xuất sprite, sinh layout spec, so ảnh |
 | Skill `psd-to-ugui` | `skills/` | Dạy Claude quy trình ráp UI, chỗ nào phải hỏi bạn |
-| Package Unity | `unity/` | 3 tool trong Editor: ghép node, áp spec lên prefab, render prefab |
+| Package Unity | `unity/` | 4 tool trong Editor: dựng UI mới, ghép node, áp spec, render (prefab hoặc scene) |
 
 ## Cần có
 
