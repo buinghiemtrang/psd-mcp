@@ -41,19 +41,9 @@ Mở lại Claude Code, gõ `/mcp` thấy server `psd2ui` là xong.
 https://github.com/buinghiemtrang/psd-mcp.git?path=/unity
 ```
 
-**3. Config cho project**: Package Manager → PSD Layout → Samples → Import "Config mẫu". Chuyển `PsdLayoutConfig.json` vào đâu đó trong `Assets/`, sửa:
+Xong. Không cần config: font chữ tự chọn theo tên font trong PSD (vd. `UTM-Eremitage` → `UTM EREMITAGE SDF`), thư mục sprite mới Claude sẽ hỏi.
 
-```json
-{
-  "fonts": { "Roboto-Bold": { "font": "Assets/Fonts/Roboto-Bold SDF.asset" } },
-  "sprite_dir": "Assets/UI/Sprites",
-  "import_like": "Assets/UI/Sprites/btn_ok.png"
-}
-```
-
-- `fonts`: tên font trong PSD (Claude đọc ra được) → font asset TMP của bạn.
-- `sprite_dir`: nơi đặt sprite mới. Để `null` thì Claude hỏi mỗi lần.
-- `import_like`: sprite mẫu để chép thiết lập import (nén, max size…) cho sprite mới.
+**Tuỳ chọn:** muốn ép font / material cụ thể hoặc cố định thư mục sprite thì Import sample "Config mẫu" (Package Manager → PSD Layout → Samples), đặt `PsdLayoutConfig.json` trong `Assets/` và sửa `fonts`, `sprite_dir`, `import_like`.
 
 ## Dùng thế nào
 

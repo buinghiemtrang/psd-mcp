@@ -284,9 +284,9 @@ namespace PsdLayout
         public static object Apply(string specPath, bool dryRun, bool createNew)
         {
             var ctx = new Ctx { Spec = LoadJson(specPath), DryRun = dryRun, CreateNew = createNew };
+            _fonts = null;
             var cfg = ConfigPath;
             ctx.Config = cfg != null ? LoadJson(cfg) : new JObject();
-            if (cfg == null) ctx.Warnings.Add("Chưa có PsdLayoutConfig.json trong Assets: font không được map, sprite_dir phải ghi trong spec.");
             string prefab = (string)ctx.Spec["prefab"];
             if (string.IsNullOrEmpty(prefab)) throw new Exception("spec.prefab trống: ghi đường dẫn prefab cần áp.");
             CheckPrefabStage(prefab);
@@ -410,7 +410,13 @@ namespace PsdLayout
                 var mat = (string)entry.Value["material"];
                 if (!string.IsNullOrEmpty(mat) && AssetDatabase.LoadAssetAtPath<Material>(mat) is Material m && tmp.fontSharedMaterial != m) tmp.fontSharedMaterial = m;
             }
-            else if (!string.IsNullOrEmpty(font)) ctx.Warnings.Add($"{path}: font PSD '{font}' chưa có trong {ConfigPath ?? "PsdLayoutConfig.json"}");
+            else if (!string.IsNullOrEmpty(font))
+            {
+                // Không có trong config: tự tìm font TMP trùng tên (bỏ hậu tố SDF), vd. "UTM-Eremitage" → "UTM EREMITAGE SDF".
+                var fa = AutoFont(font);
+                if (fa == null) ctx.Warnings.Add($"{path}: không tìm thấy font TMP nào giống '{font}' (thêm vào PsdLayoutConfig.json nếu cần)");
+                else if (tmp.font != fa) { ctx.Changes.Add($"{path}: font {(tmp.font ? tmp.font.name : "-")} → {fa.name} (tự chọn)"); tmp.font = fa; }
+            }
 
             if (n["size"] != null)
             {
@@ -446,6 +452,28 @@ namespace PsdLayout
                 ctx.Changes.Add($"{path}: text \"{tmp.text}\" → \"{n["text"]}\"");
                 tmp.text = (string)n["text"];
             }
+        }
+
+        static Dictionary<string, TMP_FontAsset> _fonts;
+
+        static TMP_FontAsset AutoFont(string psdFont)
+        {
+            if (_fonts == null)
+            {
+                _fonts = new Dictionary<string, TMP_FontAsset>();
+                foreach (var guid in AssetDatabase.FindAssets("t:TMP_FontAsset"))
+                {
+                    var fa = AssetDatabase.LoadAssetAtPath<TMP_FontAsset>(AssetDatabase.GUIDToAssetPath(guid));
+                    if (fa == null) continue;
+                    var key = Norm(fa.name);
+                    if (key.EndsWith("sdf")) key = key.Substring(0, key.Length - 3);
+                    if (!_fonts.ContainsKey(key)) _fonts[key] = fa;
+                }
+            }
+            var want = Norm(psdFont);
+            if (_fonts.TryGetValue(want, out var exact)) return exact;
+            var best = _fonts.Select(kv => (fa: kv.Value, score: Similar(want, kv.Key))).OrderByDescending(x => x.score).FirstOrDefault();
+            return best.score >= .8f ? best.fa : null;
         }
 
         static void ApplySprite(Ctx ctx, JObject n, Image img, string path)

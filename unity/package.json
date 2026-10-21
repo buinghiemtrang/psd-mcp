@@ -1,6 +1,6 @@
 {
   "name": "com.trangbn.psd-layout",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "displayName": "PSD Layout (psd-mcp)",
   "description": "Nửa Unity của psd-mcp: ghép layout spec từ PSD với prefab uGUI, áp rect / sprite / font / màu chữ, render prefab ra PNG để so với PSD. Lộ ra thành custom tool của unityMCP khi project có com.coplaydev.unity-mcp.",
   "unity": "2022.3",
