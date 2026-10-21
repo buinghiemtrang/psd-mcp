@@ -1,0 +1,8 @@
+{
+  "name": "psd-mcp-marketplace",
+  "owner": { "name": "Bui Nghiem Trang" },
+  "description": "psd-mcp: PSD → Unity uGUI",
+  "plugins": [
+    { "name": "psd-mcp", "source": "./", "description": "MCP server đọc PSD + skill ráp UI Unity từ PSD" }
+  ]
+}

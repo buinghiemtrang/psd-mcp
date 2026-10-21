@@ -1,0 +1,9 @@
+{
+  "_note": "Đặt file này ở bất kỳ đâu trong Assets (tên phải là PsdLayoutConfig.json). fonts: tên font trong PSD (xem psd_tree) → font asset TMP, material tuỳ chọn. sprite_dir: nơi import sprite mới khi spec không ghi; null = tool sẽ báo để hỏi người làm. import_like: sprite mẫu để chép thiết lập import khi Image chưa có sprite cũ.",
+  "fonts": {
+    "Roboto-Bold": { "font": "Assets/Fonts/Roboto-Bold SDF.asset" },
+    "Roboto-Regular": { "font": "Assets/Fonts/Roboto-Regular SDF.asset", "material": null }
+  },
+  "sprite_dir": null,
+  "import_like": null
+}

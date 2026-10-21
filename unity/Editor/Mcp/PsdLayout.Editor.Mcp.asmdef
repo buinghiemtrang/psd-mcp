@@ -1,0 +1,16 @@
+{
+    "name": "PsdLayout.Editor.Mcp",
+    "rootNamespace": "PsdLayout",
+    "references": ["PsdLayout.Editor", "MCPForUnity.Editor"],
+    "includePlatforms": ["Editor"],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": ["Newtonsoft.Json.dll"],
+    "autoReferenced": false,
+    "defineConstraints": ["PSDLAYOUT_UNITY_MCP"],
+    "versionDefines": [
+        { "name": "com.coplaydev.unity-mcp", "expression": "0.0.1", "define": "PSDLAYOUT_UNITY_MCP" }
+    ],
+    "noEngineReferences": false
+}

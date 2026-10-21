@@ -1,0 +1,20 @@
+{
+  "name": "com.trangbn.psd-layout",
+  "version": "0.1.0",
+  "displayName": "PSD Layout (psd-mcp)",
+  "description": "Nửa Unity của psd-mcp: ghép layout spec từ PSD với prefab uGUI, áp rect / sprite / font / màu chữ, render prefab ra PNG để so với PSD. Lộ ra thành custom tool của unityMCP khi project có com.coplaydev.unity-mcp.",
+  "unity": "2022.3",
+  "dependencies": {
+    "com.unity.ugui": "1.0.0",
+    "com.unity.nuget.newtonsoft-json": "3.2.1"
+  },
+  "keywords": ["psd", "ugui", "mcp", "claude"],
+  "author": { "name": "Bui Nghiem Trang" },
+  "samples": [
+    {
+      "displayName": "Config mẫu",
+      "description": "PsdLayoutConfig.json: map font PSD → TMP, thư mục sprite, sprite mẫu để chép thiết lập import.",
+      "path": "Samples~/Config"
+    }
+  ]
+}
