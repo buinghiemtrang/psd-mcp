@@ -1,5 +1,7 @@
 # psd-mcp: PSD → Unity uGUI với Claude Code
 
+**Tiếng Việt** · [English](README.en.md)
+
 Đưa file PSD của art cho Claude, Claude làm UI uGUI theo đúng design: vị trí, kích thước, sprite, font, màu chữ, rồi render ra ảnh để so với PSD. Làm được cả 3 trường hợp:
 
 - **Cập nhật prefab đã có** theo PSD mới (giữ script, anchor, Animator).
@@ -15,8 +17,6 @@ Bạn không cần nhớ tên tool. Cài xong, chỉ cần nói:
 > Dựng `shop.psd` vào Canvas của scene `Lobby`.
 
 Claude đọc PSD, cho bạn xem danh sách thay đổi (hoặc cây object sẽ tạo) trước, bạn đồng ý mới lưu.
-
-*English: a Claude Code plugin (Python MCP server + skill) plus a Unity package. It reads PSD layers, exports alpha-trimmed sprites and builds a layout spec, then updates an existing uGUI prefab, builds a new prefab, or builds / updates UI directly in a scene (with Undo), applying rects, sprites, TMP fonts, colors and auto anchors, and renders the result for a side-by-side diff with the PSD.*
 
 ## Gồm những gì
 
