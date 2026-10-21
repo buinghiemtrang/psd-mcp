@@ -112,6 +112,14 @@ def _text_info(layer) -> dict:
         info["size"] = round(float(st["FontSize"]) * float(layer.transform[3]), 1)
         if "FillColor" in st:
             info["color"] = _hex(st["FillColor"]["Values"])
+        if st.get("FontCaps") == 2:
+            info["caps"] = True
+        if st.get("Underline"):
+            info["underline"] = True
+        if st.get("Tracking"):
+            info["tracking"] = float(st["Tracking"])  # 1/1000 em
+        j = layer.engine_dict["ParagraphRun"]["RunArray"][0]["ParagraphSheet"]["Properties"].get("Justification", 0)
+        info["align"] = {0: "left", 1: "right", 2: "center"}.get(int(j), "left")
     except Exception:
         pass
     return info
@@ -401,8 +409,11 @@ def _is_button_name(name: str) -> bool:
 
 @mcp.tool()
 def psd_to_spec(path: str, out_dir: str, root: str | None = None, prefab: str | None = None,
-                jpg: str | None = None, rules: dict | None = None, suffix: str = "_v2") -> str:
-    """Sinh layout spec JSON (+ PNG đã cắt alpha) từ PSD để tool Unity `apply_layout_spec` áp lên prefab.
+                jpg: str | None = None, rules: dict | None = None, suffix: str = "_v2",
+                scene: str | None = None, scene_root: str | None = None) -> str:
+    """Sinh layout spec JSON (+ PNG đã cắt alpha) từ PSD cho tool Unity: `apply_layout_spec` (cập nhật UI đang có)
+    hoặc `build_layout_spec` (dựng UI mới). Đích: `prefab` (Assets/...prefab) hoặc `scene` + `scene_root` (object trong scene).
+    `root` = group trong PSD cần lấy (bỏ trống = cả file).
     Quy tắc mặc định: layer chữ → node text (TMP), `dynamic` nếu có chữ số; group tên btn/button → node button
     (nền ghép, bỏ chữ) + chữ con; group chỉ có layer ảnh → gộp thành 1 image; layer nền to bằng canvas bị bỏ.
     Group/layer ẩn trùng chỗ với node đang hiện → `states` của node đó.
@@ -500,8 +511,8 @@ def psd_to_spec(path: str, out_dir: str, root: str | None = None, prefab: str | 
             best.setdefault("states", {})[h.name] = {"png": save(im, best["name"] + "_" + h.name), "rect": rect,
                                                      "psd_path": _path_of(h)}
 
-    spec = {"version": 1, "psd": os.path.abspath(os.path.expanduser(path)), "root": root, "canvas": [W, H],
-            "png_dir": str(out), "prefab": prefab, "sprite_dir": None, "suffix": suffix, "nodes": nodes,
+    spec = {"version": 1, "psd": os.path.abspath(os.path.expanduser(path)), "psd_root": root, "canvas": [W, H],
+            "png_dir": str(out), "prefab": prefab, "scene": scene, "root": scene_root, "sprite_dir": None, "suffix": suffix, "nodes": nodes,
             "skipped": skipped}
     f = out / "spec.json"
     f.write_text(json.dumps(spec, ensure_ascii=False, indent=1))

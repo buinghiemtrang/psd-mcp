@@ -34,82 +34,198 @@ namespace PsdLayout
             }
         }
 
-        // ------------------------------------------------------------------ phiên sửa prefab
+        // ------------------------------------------------------------------ phiên sửa (prefab có sẵn / prefab mới / scene)
 
-        /// <summary>Mở prefab, đặt root vào canvas world-space W×H tại gốc để 1px PSD = 1 đơn vị world.</summary>
+        /// <summary>
+        /// Một phiên sửa UI. Toạ độ PSD quy đổi qua <see cref="Frame"/>: RectTransform coi như canvas PSD, thu theo chiều cao
+        /// (scale = Frame.rect.height / H, căn giữa ngang). Prefab: Frame = canvas world-space W×H tạm. Scene: Frame = canvas gốc
+        /// (hoặc spec.frame). Scene ghi vào Undo; dry run = Discard (revert Undo / không lưu).
+        /// </summary>
         sealed class Session : IDisposable
         {
-            public readonly GameObject Root;
+            public enum Mode { Prefab, NewPrefab, Scene }
+
+            public readonly Mode Kind;
             public readonly float W, H;
+            public GameObject Root;
+            public RectTransform Frame;
+            public readonly List<string> Notes = new();
             readonly string _path;
-            readonly GameObject _canvas;
+            GameObject _canvas;
+            Scene _preview, _scene;
+            int _undo = -1;
             readonly List<(RectTransform rt, Vector2 min, Vector2 max, Vector2 oMin, Vector2 oMax)> _saved = new();
 
-            public Session(string prefabPath, float w, float h)
+            Session(Mode kind, string path, float w, float h) { Kind = kind; _path = path; W = w; H = h; }
+
+            /// <summary>Canvas world-space W×H ở gốc làm khung (1px PSD = 1 đơn vị).</summary>
+            void MakeCanvas(Scene scene)
             {
-                _path = prefabPath;
-                W = w; H = h;
-                Root = PrefabUtility.LoadPrefabContents(prefabPath);
                 _canvas = new GameObject("PsdLayoutCanvas", typeof(RectTransform), typeof(Canvas));
-                SceneManager.MoveGameObjectToScene(_canvas, Root.scene);
+                SceneManager.MoveGameObjectToScene(_canvas, scene);
                 _canvas.GetComponent<Canvas>().renderMode = RenderMode.WorldSpace;
-                var crt = (RectTransform)_canvas.transform;
-                crt.sizeDelta = new Vector2(W, H);
-                crt.position = Vector3.zero;
-                crt.localScale = Vector3.one;
-                Root.transform.SetParent(_canvas.transform, false);
+                Frame = (RectTransform)_canvas.transform;
+                Frame.sizeDelta = new Vector2(W, H);
+                Frame.position = Vector3.zero;
+                Frame.localScale = Vector3.one;
+            }
+
+            public static Session OpenPrefab(string path, float w, float h)
+            {
+                CheckPrefabStage(path);
+                var s = new Session(Mode.Prefab, path, w, h);
+                s.Root = PrefabUtility.LoadPrefabContents(path);
+                s.MakeCanvas(s.Root.scene);
+                s.Root.transform.SetParent(s._canvas.transform, false);
                 // Root + SafeArea tạm stretch kín canvas; trả lại trước khi Save.
-                Stretch(Root.transform as RectTransform);
-                foreach (var c in Root.GetComponentsInChildren<Component>(true))
-                    if (c != null && c.GetType().Name.Contains("SafeArea")) Stretch(c.transform as RectTransform);
+                s.Stretch(s.Root.transform as RectTransform);
+                foreach (var c in s.Root.GetComponentsInChildren<Component>(true))
+                    if (c != null && c.GetType().Name.Contains("SafeArea")) s.Stretch(c.transform as RectTransform);
                 Canvas.ForceUpdateCanvases();
+                return s;
+            }
+
+            public static Session NewPrefab(string path, string name, float w, float h)
+            {
+                var s = new Session(Mode.NewPrefab, path, w, h);
+                s._preview = EditorSceneManager.NewPreviewScene();
+                s.MakeCanvas(s._preview);
+                s.Root = new GameObject(name, typeof(RectTransform));
+                SceneManager.MoveGameObjectToScene(s.Root, s._preview);
+                s.Root.transform.SetParent(s._canvas.transform, false);
+                StretchFull((RectTransform)s.Root.transform);
+                return s;
+            }
+
+            /// <summary>Mở object `rootPath` trong scene (mở additive nếu scene chưa mở). Object thuộc prefab instance thì báo sửa prefab gốc.</summary>
+            public static Session OpenScene(string scenePath, string rootPath, string framePath, float w, float h)
+            {
+                var s = new Session(Mode.Scene, scenePath, w, h);
+                s._scene = SceneManager.GetSceneByPath(scenePath);
+                if (!s._scene.IsValid() || !s._scene.isLoaded)
+                {
+                    s._scene = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Additive);
+                    s.Notes.Add($"Đã mở scene {scenePath} (additive) để sửa, xem xong thì Save hoặc đóng scene.");
+                }
+                s.Root = FindInScene(s._scene, rootPath)?.gameObject ?? throw new Exception($"Không thấy '{rootPath}' trong {scenePath}");
+                if (PrefabUtility.IsPartOfPrefabInstance(s.Root))
+                    throw new Exception($"'{rootPath}' thuộc prefab instance ({PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(s.Root)}): sửa prefab gốc (spec.prefab) thay vì scene.");
+                if (!string.IsNullOrEmpty(framePath))
+                    s.Frame = FindInScene(s._scene, framePath) as RectTransform ?? throw new Exception($"Không thấy frame '{framePath}'");
+                else
+                {
+                    var canvas = s.Root.GetComponentInParent<Canvas>(true);
+                    s.Frame = canvas != null ? (RectTransform)canvas.rootCanvas.transform : throw new Exception($"'{rootPath}' không nằm trong Canvas nào");
+                }
+                Undo.IncrementCurrentGroup();
+                Undo.SetCurrentGroupName("PSD Layout");
+                s._undo = Undo.GetCurrentGroup();
+                Undo.RegisterFullObjectHierarchyUndo(s.Root, "PSD Layout");
+                Canvas.ForceUpdateCanvases();
+                return s;
+            }
+
+            static Transform FindInScene(Scene scene, string path)
+            {
+                if (string.IsNullOrEmpty(path)) return null;
+                var parts = path.Split(new[] { '/' }, 2);
+                var top = scene.GetRootGameObjects().FirstOrDefault(g => g.name == parts[0]);
+                if (top == null) return null;
+                return parts.Length == 1 ? top.transform : top.transform.Find(parts[1]);
+            }
+
+            public static string ScenePath(Transform t)
+            {
+                var parts = new List<string>();
+                for (var x = t; x != null; x = x.parent) parts.Add(x.name);
+                parts.Reverse();
+                return string.Join("/", parts);
+            }
+
+            public void Created(GameObject go)
+            {
+                if (Kind == Mode.Scene) Undo.RegisterCreatedObjectUndo(go, "PSD Layout");
+            }
+
+            static void StretchFull(RectTransform rt)
+            {
+                rt.anchorMin = Vector2.zero; rt.anchorMax = Vector2.one;
+                rt.offsetMin = Vector2.zero; rt.offsetMax = Vector2.zero;
             }
 
             void Stretch(RectTransform rt)
             {
-                if (rt == null || _saved.Any(s => s.rt == rt)) return;
+                if (rt == null || _saved.Any(x => x.rt == rt)) return;
                 _saved.Add((rt, rt.anchorMin, rt.anchorMax, rt.offsetMin, rt.offsetMax));
-                rt.anchorMin = Vector2.zero; rt.anchorMax = Vector2.one;
-                rt.offsetMin = Vector2.zero; rt.offsetMax = Vector2.zero;
+                StretchFull(rt);
             }
+
+            float Scale => Frame.rect.height / H;
 
             public float[] ToPsd(RectTransform rt)
             {
                 var c = new Vector3[4];
                 rt.GetWorldCorners(c);
+                for (int i = 0; i < 4; i++) c[i] = Frame.InverseTransformPoint(c[i]);
                 float x0 = c.Min(v => v.x), x1 = c.Max(v => v.x), y0 = c.Min(v => v.y), y1 = c.Max(v => v.y);
-                return new[] { x0 + W / 2f, H / 2f - y1, x1 + W / 2f, H / 2f - y0 };
+                var fc = Frame.rect.center;
+                float k = Scale;
+                return new[] { (x0 - fc.x) / k + W / 2f, H / 2f - (y1 - fc.y) / k, (x1 - fc.x) / k + W / 2f, H / 2f - (y0 - fc.y) / k };
             }
 
             public void SetRect(RectTransform rt, float[] r, bool sizeOnly = false, bool moveOnly = false)
             {
-                float w = r[2] - r[0], h = r[3] - r[1];
+                float k = Scale;
+                var fs = Frame.lossyScale;
+                float ww = (r[2] - r[0]) * k * fs.x, wh = (r[3] - r[1]) * k * fs.y;
                 var ls = rt.lossyScale;
                 if (!moveOnly)
                 {
-                    rt.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, w / Mathf.Max(1e-4f, ls.x));
-                    rt.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, h / Mathf.Max(1e-4f, ls.y));
+                    rt.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, ww / Mathf.Max(1e-4f, ls.x));
+                    rt.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, wh / Mathf.Max(1e-4f, ls.y));
                 }
                 if (sizeOnly) return;
                 var cur = rt.rect.size;
                 float cw = cur.x * ls.x, ch = cur.y * ls.y;
-                float cx = (r[0] + r[2]) / 2f, cy = (r[1] + r[3]) / 2f;
-                rt.position = new Vector3(cx - W / 2f + (rt.pivot.x - .5f) * cw, H / 2f - cy + (rt.pivot.y - .5f) * ch, rt.position.z);
+                var fc = Frame.rect.center;
+                var world = Frame.TransformPoint(new Vector3(fc.x + ((r[0] + r[2]) / 2f - W / 2f) * k, fc.y + (H / 2f - (r[1] + r[3]) / 2f) * k, 0));
+                rt.position = new Vector3(world.x + (rt.pivot.x - .5f) * cw, world.y + (rt.pivot.y - .5f) * ch, rt.position.z);
             }
 
             public void Save()
             {
-                Restore();
-                PrefabUtility.SaveAsPrefabAsset(Root, _path, out bool ok);
-                if (!ok) throw new Exception("SaveAsPrefabAsset lỗi: " + _path);
+                switch (Kind)
+                {
+                    case Mode.Prefab:
+                        Restore();
+                        PrefabUtility.SaveAsPrefabAsset(Root, _path, out bool ok);
+                        if (!ok) throw new Exception("SaveAsPrefabAsset lỗi: " + _path);
+                        break;
+                    case Mode.NewPrefab:
+                        Directory.CreateDirectory(Path.GetDirectoryName(_path));
+                        Root.transform.SetParent(null, false);
+                        PrefabUtility.SaveAsPrefabAsset(Root, _path, out bool ok2);
+                        if (!ok2) throw new Exception("SaveAsPrefabAsset lỗi: " + _path);
+                        break;
+                    case Mode.Scene:
+                        EditorSceneManager.MarkSceneDirty(Root.scene);
+                        Undo.CollapseUndoOperations(_undo);
+                        break;
+                }
+            }
+
+            /// <summary>Bỏ thay đổi (dry run). Prefab: không lưu là xong; scene: revert Undo.</summary>
+            public void Discard()
+            {
+                if (Kind == Mode.Scene && _undo >= 0) Undo.RevertAllDownToGroup(_undo);
             }
 
             void Restore()
             {
-                foreach (var s in _saved)
+                foreach (var x in _saved)
                 {
-                    s.rt.anchorMin = s.min; s.rt.anchorMax = s.max;
-                    s.rt.offsetMin = s.oMin; s.rt.offsetMax = s.oMax;
+                    x.rt.anchorMin = x.min; x.rt.anchorMax = x.max;
+                    x.rt.offsetMin = x.oMin; x.rt.offsetMax = x.oMax;
                 }
                 _saved.Clear();
                 if (Root.transform.parent != null) Root.transform.SetParent(null, false);
@@ -117,11 +233,28 @@ namespace PsdLayout
 
             public void Dispose()
             {
-                if (Root != null && Root.transform.parent != null) Root.transform.SetParent(null, false);
-                if (_canvas != null) Object.DestroyImmediate(_canvas);
-                if (Root != null) PrefabUtility.UnloadPrefabContents(Root);
+                if (Kind == Mode.Prefab)
+                {
+                    if (Root != null && Root.transform.parent != null) Root.transform.SetParent(null, false);
+                    if (_canvas != null) Object.DestroyImmediate(_canvas);
+                    if (Root != null) PrefabUtility.UnloadPrefabContents(Root);
+                }
+                else if (Kind == Mode.NewPrefab) EditorSceneManager.ClosePreviewScene(_preview);
             }
         }
+
+        /// <summary>Mở phiên theo đích trong spec: `scene` + `root` (UI trong scene) hoặc `prefab`.</summary>
+        static Session Open(JObject spec)
+        {
+            var canvas = spec["canvas"] as JArray;
+            float w = (float)canvas[0], h = (float)canvas[1];
+            string scene = (string)spec["scene"], prefab = (string)spec["prefab"];
+            if (!string.IsNullOrEmpty(scene)) return Session.OpenScene(scene, (string)spec["root"], (string)spec["frame"], w, h);
+            if (!string.IsNullOrEmpty(prefab)) return Session.OpenPrefab(prefab, w, h);
+            throw new Exception("Spec chưa có đích: ghi `prefab` (Assets/...prefab) hoặc `scene` + `root` (đường dẫn object trong scene).");
+        }
+
+        static string TargetName(JObject spec) => !string.IsNullOrEmpty((string)spec["scene"]) ? $"{spec["scene"]}:{spec["root"]}" : (string)spec["prefab"];
 
         // ------------------------------------------------------------------ tiện ích
 
@@ -210,14 +343,13 @@ namespace PsdLayout
         // ------------------------------------------------------------------ match_layout_spec (v3)
 
         /// <summary>Ghép node spec với node prefab theo vị trí + tên + chữ + sprite. Ghi `target` + `match_score` vào spec.</summary>
-        public static object Match(string specPath, string prefab, bool overwrite, float minScore)
+        public static object Match(string specPath, string prefab, string scene, string root, bool overwrite, float minScore)
         {
             var spec = LoadJson(specPath);
-            prefab ??= (string)spec["prefab"];
-            if (string.IsNullOrEmpty(prefab)) throw new Exception("Thiếu prefab (tham số hoặc spec.prefab).");
-            var canvas = spec["canvas"] as JArray;
+            if (!string.IsNullOrEmpty(prefab)) { spec["prefab"] = prefab; spec.Remove("scene"); }
+            if (!string.IsNullOrEmpty(scene)) { spec["scene"] = scene; spec["root"] = root; }
             var lines = new List<string>();
-            using (var s = new Session(prefab, (float)canvas[0], (float)canvas[1]))
+            using (var s = Open(spec))
             {
                 var cands = s.Root.GetComponentsInChildren<RectTransform>(true).Where(r => r.transform != s.Root.transform)
                     .Select(r => new
@@ -265,10 +397,10 @@ namespace PsdLayout
                 }
 
                 Visit(spec["nodes"] as JArray, null);
+                s.Discard();
             }
-            spec["prefab"] = prefab;
             SaveJson(specPath, spec);
-            return new { spec = specPath, prefab, result = lines };
+            return new { spec = specPath, target = TargetName(spec), result = lines };
         }
 
         // ------------------------------------------------------------------ apply_layout_spec (v2)
@@ -287,28 +419,28 @@ namespace PsdLayout
             _fonts = null;
             var cfg = ConfigPath;
             ctx.Config = cfg != null ? LoadJson(cfg) : new JObject();
-            string prefab = (string)ctx.Spec["prefab"];
-            if (string.IsNullOrEmpty(prefab)) throw new Exception("spec.prefab trống: ghi đường dẫn prefab cần áp.");
-            CheckPrefabStage(prefab);
             ctx.PngDir = (string)ctx.Spec["png_dir"];
             ctx.SpriteDir = (string)ctx.Spec["sprite_dir"] ?? (string)ctx.Config["sprite_dir"];
-            var canvas = ctx.Spec["canvas"] as JArray;
-
-            using (var s = new Session(prefab, (float)canvas[0], (float)canvas[1]))
+            List<string> notes;
+            using (var s = Open(ctx.Spec))
             {
+                notes = s.Notes;
                 ApplyNodes(ctx, s, ctx.Spec["nodes"] as JArray, s.Root.transform);
-                if (!dryRun)
+                if (dryRun) s.Discard();
+                else
                 {
                     s.Save();
                     if (ctx.Created.Count > 0) SaveJson(specPath, ctx.Spec);
                 }
             }
+            string prefab = (string)ctx.Spec["prefab"];
             if (!dryRun)
             {
                 AssetDatabase.SaveAssets();
-                WarnSceneOverrides(prefab, ctx.Warnings);
+                if (string.IsNullOrEmpty((string)ctx.Spec["scene"])) WarnSceneOverrides(prefab, ctx.Warnings);
+                else notes.Add("Scene đã đổi nhưng chưa Save: xem lại rồi Ctrl+S (Ctrl+Z để hoàn tác).");
             }
-            return new { prefab, dry_run = dryRun, changes = ctx.Changes, created = ctx.Created, warnings = ctx.Warnings };
+            return new { target = TargetName(ctx.Spec), dry_run = dryRun, changes = ctx.Changes, created = ctx.Created, warnings = ctx.Warnings, notes };
         }
 
         static void ApplyNodes(Ctx ctx, Session s, JArray nodes, Transform parent)
@@ -323,7 +455,7 @@ namespace PsdLayout
                 if (t == null && string.IsNullOrEmpty(target))
                 {
                     if (!ctx.CreateNew) { ctx.Changes.Add($"[bỏ qua] {kind} \"{name}\": chưa có target"); ApplyNodes(ctx, s, n["children"] as JArray, parent); continue; }
-                    t = Create(kind, name, parent);
+                    t = Create(s, kind, name, parent);
                     n["target"] = RelPath(s.Root.transform, t);
                     ctx.Created.Add($"{n["target"]} ({kind}) — thêm [SerializeField] trong script nếu cần gán");
                 }
@@ -332,15 +464,24 @@ namespace PsdLayout
             }
         }
 
-        static Transform Create(string kind, string name, Transform parent)
+        static Transform Create(Session s, string kind, string name, Transform parent)
         {
-            var go = new GameObject(name, typeof(RectTransform));
+            var go = new GameObject(UniqueName(parent, name), typeof(RectTransform));
             go.layer = parent.gameObject.layer;
             go.transform.SetParent(parent, false);
+            s.Created(go);
             if (kind == "image" || kind == "button") go.AddComponent<Image>().raycastTarget = kind == "button";
             if (kind == "button") go.AddComponent<Button>();
             if (kind == "text") { var tmp = go.AddComponent<TextMeshProUGUI>(); tmp.alignment = TextAlignmentOptions.Center; tmp.raycastTarget = false; }
             return go.transform;
+        }
+
+        static string UniqueName(Transform parent, string name)
+        {
+            name = string.IsNullOrWhiteSpace(name) ? "Node" : name.Trim();
+            string n = name;
+            for (int k = 2; parent.Find(n) != null; k++) n = $"{name}_{k}";
+            return n;
         }
 
         static void ApplyNode(Ctx ctx, Session s, JObject n, Transform t)
@@ -418,7 +559,8 @@ namespace PsdLayout
                 else if (tmp.font != fa)
                 {
                     ctx.Changes.Add($"{path}: font {(tmp.font ? tmp.font.name : "-")} → {AssetDatabase.GetAssetPath(fa)} (tự chọn)");
-                    if (others != null) ctx.Warnings.Add($"{path}: '{font}' có nhiều font TMP trùng tên, đã chọn {AssetDatabase.GetAssetPath(fa)}; bản khác: {string.Join(", ", others.Select(AssetDatabase.GetAssetPath))}");
+                    var dup = $"'{font}' có nhiều font TMP trùng tên, đã chọn {AssetDatabase.GetAssetPath(fa)}; bản khác: {string.Join(", ", others?.Select(AssetDatabase.GetAssetPath) ?? Enumerable.Empty<string>())}";
+                    if (others != null && !ctx.Warnings.Contains(dup)) ctx.Warnings.Add(dup);
                     tmp.font = fa;
                 }
             }
@@ -452,6 +594,15 @@ namespace PsdLayout
                     tmp.color = c;
                 }
             }
+            if (n["tracking"] != null)
+            {
+                float sp = (float)n["tracking"] / 10f; // PSD 1/1000 em → TMP 1/100 em
+                if (Mathf.Abs(tmp.characterSpacing - sp) > .1f) { ctx.Changes.Add($"{path}: characterSpacing {tmp.characterSpacing:0.#} → {sp:0.#}"); tmp.characterSpacing = sp; }
+            }
+            var style = tmp.fontStyle;
+            if (n["caps"] != null) style = (bool)n["caps"] ? style | FontStyles.UpperCase : style & ~FontStyles.UpperCase;
+            if (n["underline"] != null) style = (bool)n["underline"] ? style | FontStyles.Underline : style & ~FontStyles.Underline;
+            if (style != tmp.fontStyle) { ctx.Changes.Add($"{path}: fontStyle {tmp.fontStyle} → {style}"); tmp.fontStyle = style; }
             if ((bool?)n["dynamic"] != true && n["text"] != null && tmp.text != (string)n["text"])
             {
                 ctx.Changes.Add($"{path}: text \"{tmp.text}\" → \"{n["text"]}\"");
@@ -491,6 +642,8 @@ namespace PsdLayout
                 if (best.score < .8f) return null;
                 hits = best.list;
             }
+            // Ưu tiên font của game, không lấy bản mẫu trong thư mục "TextMesh Pro/".
+            hits = hits.OrderBy(f => AssetDatabase.GetAssetPath(f).Contains("/TextMesh Pro/") ? 1 : 0).ToList();
             if (hits.Count > 1) others = hits.Skip(1).ToList();
             return hits[0];
         }
@@ -583,21 +736,215 @@ namespace PsdLayout
             }
         }
 
-        // ------------------------------------------------------------------ render_prefab (v2)
+        // ------------------------------------------------------------------ build_layout_spec: dựng UI mới
 
-        /// <summary>Render prefab UI vào PNG W×H qua camera ortho + canvas ScreenSpaceCamera trong preview scene. Không lưu prefab.</summary>
-        public static object Render(string prefab, string outPath, int width, int height, JObject states)
+        /// <summary>
+        /// Dựng UI mới từ spec: prefab mới (`prefab`) hoặc object mới trong scene (`scene` + `parent`). Anchor tự suy theo vị trí trong
+        /// khung cha (1/3 trên / giữa / dưới, dải gần full ngang thì stretch). Project có UIFitHeight thì bọc trong `Content` W×H neo mép trên.
+        /// Ghi `target` từng node + đích vào spec để lần sau cập nhật bằng apply_layout_spec.
+        /// </summary>
+        public static object Build(string specPath, string prefab, string scene, string parent, string name, bool dryRun, bool overwrite)
         {
-            var root = PrefabUtility.LoadPrefabContents(prefab);
-            GameObject camGo = null, canvasGo = null;
+            var ctx = new Ctx { Spec = LoadJson(specPath), DryRun = dryRun, CreateNew = true };
+            _fonts = null;
+            var cfg = ConfigPath;
+            ctx.Config = cfg != null ? LoadJson(cfg) : new JObject();
+            ctx.PngDir = (string)ctx.Spec["png_dir"];
+            ctx.SpriteDir = (string)ctx.Spec["sprite_dir"] ?? (string)ctx.Config["sprite_dir"];
+            var canvas = ctx.Spec["canvas"] as JArray;
+            float W = (float)canvas[0], H = (float)canvas[1];
+            bool inScene = !string.IsNullOrEmpty(scene);
+            if (!inScene)
+            {
+                if (string.IsNullOrEmpty(prefab) || !prefab.StartsWith("Assets/") || !prefab.EndsWith(".prefab"))
+                    throw new Exception("Cần `prefab` = Assets/....prefab (prefab mới) hoặc `scene` + `parent` (dựng trong scene).");
+                if (File.Exists(prefab) && !overwrite)
+                    throw new Exception($"{prefab} đã có: dùng match_layout_spec + apply_layout_spec để cập nhật, hoặc overwrite=true để dựng lại.");
+            }
+            if (string.IsNullOrEmpty(name)) name = inScene ? "PsdLayout" : Path.GetFileNameWithoutExtension(prefab);
+
+            List<string> notes;
+            Transform root;
+            using (var s = inScene ? Session.OpenScene(scene, parent, (string)ctx.Spec["frame"], W, H) : Session.NewPrefab(prefab, name, W, H))
+            {
+                notes = s.Notes;
+                if (inScene)
+                {
+                    var go = new GameObject(UniqueName(s.Root.transform, name), typeof(RectTransform));
+                    go.layer = s.Root.layer;
+                    go.transform.SetParent(s.Root.transform, false);
+                    s.Created(go);
+                    var rrt = (RectTransform)go.transform;
+                    rrt.anchorMin = Vector2.zero; rrt.anchorMax = Vector2.one; rrt.offsetMin = rrt.offsetMax = Vector2.zero;
+                    root = go.transform;
+                }
+                else root = s.Root.transform;
+
+                Transform container = root;
+                var fit = FindType("UIFitHeight");
+                if (fit != null)
+                {
+                    // Khối thiết kế W×H neo mép trên; UIFitHeight co cả khối khi Play. Toạ độ PSD tính thẳng trên khối này.
+                    var content = new GameObject("Content", typeof(RectTransform));
+                    content.layer = root.gameObject.layer;
+                    content.transform.SetParent(root, false);
+                    s.Created(content);
+                    var crt = (RectTransform)content.transform;
+                    crt.anchorMin = crt.anchorMax = crt.pivot = new Vector2(.5f, 1f);
+                    crt.sizeDelta = new Vector2(W, H);
+                    crt.anchoredPosition = Vector2.zero;
+                    var comp = content.AddComponent(fit);
+                    fit.GetField("designWidth")?.SetValue(comp, W);
+                    fit.GetField("designHeight")?.SetValue(comp, H);
+                    s.Frame = crt;
+                    container = crt;
+                    ctx.Created.Add($"Content ({fit.Name} {W}x{H}, neo mép trên)");
+                }
+                Canvas.ForceUpdateCanvases();
+                BuildNodes(ctx, s, ctx.Spec["nodes"] as JArray, container, new[] { 0f, 0f, W, H }, root);
+
+                if (inScene) { ctx.Spec["scene"] = scene; ctx.Spec["root"] = Session.ScenePath(root); ctx.Spec.Remove("prefab"); }
+                else { ctx.Spec["prefab"] = prefab; ctx.Spec.Remove("scene"); ctx.Spec.Remove("root"); }
+
+                if (dryRun) s.Discard();
+                else
+                {
+                    s.Save();
+                    SaveJson(specPath, ctx.Spec);
+                }
+            }
+            if (!dryRun)
+            {
+                AssetDatabase.SaveAssets();
+                if (inScene) notes.Add("Scene đã đổi nhưng chưa Save: xem lại rồi Ctrl+S (Ctrl+Z để hoàn tác).");
+            }
+            return new { target = TargetName(ctx.Spec), dry_run = dryRun, created = ctx.Created, changes = ctx.Changes, warnings = ctx.Warnings, notes };
+        }
+
+        /// <summary>Tắt xuống dòng (TMP mới: textWrappingMode, cũ: enableWordWrapping).</summary>
+        static void NoWrap(TMP_Text tmp)
+        {
+            var mode = typeof(TMP_Text).GetProperty("textWrappingMode");
+            if (mode != null) mode.SetValue(tmp, Enum.Parse(mode.PropertyType, "NoWrap"));
+            else typeof(TMP_Text).GetProperty("enableWordWrapping")?.SetValue(tmp, false);
+        }
+
+        static Type FindType(string name) => AppDomain.CurrentDomain.GetAssemblies()
+            .Select(a => { try { return a.GetTypes().FirstOrDefault(t => t.Name == name && typeof(Component).IsAssignableFrom(t)); } catch { return null; } })
+            .FirstOrDefault(t => t != null);
+
+        /// <summary>Anchor theo vị trí trong khung cha (toạ độ PSD): 1/3 trên → neo trên, 1/3 dưới → neo dưới, còn lại giữa; rộng ≥ 90% khung → stretch ngang.</summary>
+        static string SetAnchors(RectTransform rt, float[] r, float[] pr)
+        {
+            float pw = Mathf.Max(1, pr[2] - pr[0]), ph = Mathf.Max(1, pr[3] - pr[1]);
+            float fx = ((r[0] + r[2]) / 2f - pr[0]) / pw, fy = ((r[1] + r[3]) / 2f - pr[1]) / ph;
+            bool wide = (r[2] - r[0]) >= .9f * pw;
+            float ax = fx < 1f / 3f ? 0f : fx > 2f / 3f ? 1f : .5f;
+            float ay = fy < 1f / 3f ? 1f : fy > 2f / 3f ? 0f : .5f;
+            rt.anchorMin = new Vector2(wide ? 0f : ax, ay);
+            rt.anchorMax = new Vector2(wide ? 1f : ax, ay);
+            rt.pivot = new Vector2(.5f, .5f);
+            string v = ay == 1f ? "trên" : ay == 0f ? "dưới" : "giữa";
+            string h = wide ? "stretch ngang" : ax == 0f ? "trái" : ax == 1f ? "phải" : "giữa";
+            return $"{v}-{h}";
+        }
+
+        static void BuildNodes(Ctx ctx, Session s, JArray nodes, Transform parent, float[] pr, Transform root)
+        {
+            if (nodes == null) return;
+            foreach (JObject n in nodes)
+            {
+                var r = Rect(n["rect"]);
+                if ((bool?)n["skip"] == true || r == null) continue;
+                string kind = (string)n["kind"];
+                var t = Create(s, kind, (string)n["name"], parent);
+                var rt = (RectTransform)t;
+                string path = RelPath(root, t), anchor = SetAnchors(rt, r, pr);
+                if (kind == "text")
+                {
+                    var tmp = t.GetComponent<TMP_Text>();
+                    tmp.text = (string)n["text"] ?? "";
+                    tmp.overflowMode = TextOverflowModes.Overflow;
+                    NoWrap(tmp);
+                    string align = (string)n["align"] ?? "center";
+                    tmp.alignment = align == "left" ? TextAlignmentOptions.Left : align == "right" ? TextAlignmentOptions.Right : TextAlignmentOptions.Center;
+                    ApplyText(ctx, n, tmp, path);
+                    // Khung PSD sát glyph: nới cho chữ động dài hơn / dấu tiếng Việt, giữ mép theo căn lề.
+                    float w = (r[2] - r[0]) * 1.1f + 16f, h = (r[3] - r[1]) * 1.35f;
+                    float cy = (r[1] + r[3]) / 2f;
+                    float x0 = align == "left" ? r[0] : align == "right" ? r[2] - w : (r[0] + r[2] - w) / 2f;
+                    s.SetRect(rt, new[] { x0, cy - h / 2f, x0 + w, cy + h / 2f });
+                }
+                else
+                {
+                    var img = t.GetComponent<Image>();
+                    if (img != null) ApplySprite(ctx, n, img, path);
+                    if (kind == "button") t.GetComponent<Button>().targetGraphic = img;
+                    s.SetRect(rt, r);
+                }
+                foreach (var st in (n["states"] as JObject)?.Properties() ?? Enumerable.Empty<JProperty>())
+                {
+                    // State (disabled, invader…) = object con riêng, tắt sẵn.
+                    var so = (JObject)st.Value;
+                    var stT = (RectTransform)Create(s, "image", st.Name, t);
+                    stT.anchorMin = Vector2.zero; stT.anchorMax = Vector2.one; stT.offsetMin = stT.offsetMax = Vector2.zero;
+                    ApplySprite(ctx, so, stT.GetComponent<Image>(), RelPath(root, stT));
+                    stT.gameObject.SetActive(false);
+                    so["target"] = RelPath(root, stT);
+                }
+                n["target"] = path;
+                ctx.Created.Add($"{path} ({kind}, neo {anchor})");
+                BuildNodes(ctx, s, n["children"] as JArray, t, r, root);
+            }
+        }
+
+        // ------------------------------------------------------------------ render_prefab
+
+        /// <summary>
+        /// Render UI vào PNG W×H qua camera ortho + canvas ScreenSpaceCamera trong preview scene, không lưu gì.
+        /// Prefab: load prefab. Scene: copy canvas gốc chứa `root` sang preview scene, tắt các nhánh khác để giữ đúng layout.
+        /// </summary>
+        public static object Render(string prefab, string scene, string rootPath, string outPath, int width, int height, JObject states)
+        {
+            GameObject root = null, camGo = null, canvasGo = null;
+            Scene preview = default;
             RenderTexture rtex = null;
             Texture2D tex = null;
             var missing = new List<string>();
+            bool inScene = !string.IsNullOrEmpty(scene);
             try
             {
+                Transform target;
+                if (inScene)
+                {
+                    var sc = SceneManager.GetSceneByPath(scene);
+                    if (!sc.IsValid() || !sc.isLoaded) sc = EditorSceneManager.OpenScene(scene, OpenSceneMode.Additive);
+                    var parts = (rootPath ?? "").Split(new[] { '/' }, 2);
+                    var top = sc.GetRootGameObjects().FirstOrDefault(g => g.name == parts[0]);
+                    var src = top == null ? null : parts.Length == 1 ? top.transform : top.transform.Find(parts[1]);
+                    if (src == null) throw new Exception($"Không thấy '{rootPath}' trong {scene}");
+                    var rootCanvas = src.GetComponentInParent<Canvas>(true)?.rootCanvas;
+                    if (rootCanvas == null) throw new Exception($"'{rootPath}' không nằm trong Canvas nào");
+                    preview = EditorSceneManager.NewPreviewScene();
+                    root = Object.Instantiate(rootCanvas.gameObject);
+                    SceneManager.MoveGameObjectToScene(root, preview);
+                    string rel = RelPath(rootCanvas.transform, src);
+                    target = string.IsNullOrEmpty(rel) ? root.transform : root.transform.Find(rel);
+                    target.gameObject.SetActive(true);
+                    for (var x = target; x != root.transform; x = x.parent)
+                    {
+                        x.gameObject.SetActive(true);
+                        foreach (Transform sib in x.parent) if (sib != x) sib.gameObject.SetActive(false);
+                    }
+                }
+                else
+                {
+                    root = PrefabUtility.LoadPrefabContents(prefab);
+                    target = root.transform;
+                }
                 foreach (var p in states?.Properties() ?? Enumerable.Empty<JProperty>())
                 {
-                    var t = FindTarget(root.transform, p.Name);
+                    var t = FindTarget(target, p.Name);
                     if (t == null) missing.Add(p.Name); else t.gameObject.SetActive((bool)p.Value);
                 }
                 camGo = new GameObject("PsdLayoutRenderCam", typeof(Camera));
@@ -612,19 +959,24 @@ namespace PsdLayout
                 rtex = new RenderTexture(width, height, 24, RenderTextureFormat.ARGB32);
                 cam.targetTexture = rtex;
 
-                canvasGo = new GameObject("PsdLayoutRenderCanvas", typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler));
-                SceneManager.MoveGameObjectToScene(canvasGo, root.scene);
-                var canvas = canvasGo.GetComponent<Canvas>();
+                Canvas canvas;
+                if (inScene) canvas = root.GetComponent<Canvas>();
+                else
+                {
+                    canvasGo = new GameObject("PsdLayoutRenderCanvas", typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler));
+                    SceneManager.MoveGameObjectToScene(canvasGo, root.scene);
+                    canvas = canvasGo.GetComponent<Canvas>();
+                    var scaler = canvasGo.GetComponent<CanvasScaler>();
+                    scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+                    scaler.referenceResolution = new Vector2(width, height);
+                    scaler.matchWidthOrHeight = 1f;
+                    root.transform.SetParent(canvasGo.transform, false);
+                    var rrt = root.transform as RectTransform;
+                    if (rrt != null) { rrt.anchorMin = Vector2.zero; rrt.anchorMax = Vector2.one; rrt.offsetMin = rrt.offsetMax = Vector2.zero; }
+                }
                 canvas.renderMode = RenderMode.ScreenSpaceCamera;
                 canvas.worldCamera = cam;
                 canvas.planeDistance = 50;
-                var scaler = canvasGo.GetComponent<CanvasScaler>();
-                scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-                scaler.referenceResolution = new Vector2(width, height);
-                scaler.matchWidthOrHeight = 1f;
-                root.transform.SetParent(canvasGo.transform, false);
-                var rrt = root.transform as RectTransform;
-                if (rrt != null) { rrt.anchorMin = Vector2.zero; rrt.anchorMax = Vector2.one; rrt.offsetMin = rrt.offsetMax = Vector2.zero; }
                 Canvas.ForceUpdateCanvases();
                 cam.Render();
 
@@ -639,10 +991,17 @@ namespace PsdLayout
             }
             finally
             {
-                if (root != null && root.transform.parent != null) root.transform.SetParent(null, false);
-                if (camGo) Object.DestroyImmediate(camGo);
-                if (canvasGo) Object.DestroyImmediate(canvasGo);
-                if (root != null) PrefabUtility.UnloadPrefabContents(root);
+                if (inScene)
+                {
+                    if (preview.IsValid()) EditorSceneManager.ClosePreviewScene(preview);
+                }
+                else
+                {
+                    if (root != null && root.transform.parent != null) root.transform.SetParent(null, false);
+                    if (camGo) Object.DestroyImmediate(camGo);
+                    if (canvasGo) Object.DestroyImmediate(canvasGo);
+                    if (root != null) PrefabUtility.UnloadPrefabContents(root);
+                }
                 if (rtex) { rtex.Release(); Object.DestroyImmediate(rtex); }
                 if (tex) Object.DestroyImmediate(tex);
             }
